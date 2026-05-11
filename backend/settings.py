@@ -64,7 +64,13 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    'TRAILING_SLASH': True,  # Enforce trailing slashes
+    'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',  # Ensure JSON errors
 }
+
+# Enforce trailing slashes strictly - no auto-redirect
+# Only URLs with trailing slash will match patterns with trailing slash
+APPEND_SLASH = False
 
 # Application definition
 
@@ -82,8 +88,11 @@ INSTALLED_APPS = [
     'accounts',
     'courses',
     'leads',
+    'LeadManagement.apps.LeadmanagementConfig',
     'blog',
+    'campaign',
     'enrollments',
+    'Demo',
     'django_celery_results',
     'instructors',
     'learning',
@@ -167,7 +176,7 @@ TIME_ZONE = 'Asia/Kolkata'
 
 USE_I18N = True
 
-USE_TZ = True
+USE_TZ = False
 
 
 # Static files (CSS, JavaScript, Images)

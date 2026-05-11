@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.db.models import Q
 from .models import Category, Course, CourseContent, Module, Lesson, Assignment, Submission, Batch
+from .storage import get_signed_url
 
 
 # ─────────────────────────────────────────────
@@ -14,10 +15,21 @@ class AssignmentSerializer(serializers.ModelSerializer):
         help_text="Batch is mandatory to ensure students receive notification emails."
     )
 
+    instructor_details = serializers.SerializerMethodField()
+
     class Meta:
         model = Assignment
         fields = "__all__"
         read_only_fields = ('instructor', 'created_by', 'updated_by')
+
+    def get_instructor_details(self, obj):
+        if obj.instructor:
+            return {
+                "id": obj.instructor.id,
+                "name": obj.instructor.full_name,
+                "email": obj.instructor.email
+            }
+        return None
 
     def validate(self, attrs):
         request = self.context.get('request')
@@ -233,14 +245,27 @@ class CategorySerializer(serializers.ModelSerializer):
 # ─────────────────────────────────────────────
 class SubmissionSerializer(serializers.ModelSerializer):
     file_upload = serializers.FileField(
-        required=True, 
+        required=True,
         allow_null=False,
+        write_only=True,
         error_messages={'required': 'Assignment file is mandatory.', 'null': 'Assignment file is mandatory.'}
     )
+    signed_url = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Submission
         fields = "__all__"
+        extra_kwargs = {
+            'file_upload': {'write_only': True}
+        }
+
+    def get_signed_url(self, obj):
+        if obj.file_upload:
+            try:
+                return get_signed_url(obj.file_upload.name)
+            except Exception:
+                return None
+        return None
 
     def validate_file_upload(self, value):
         if not value:

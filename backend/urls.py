@@ -26,9 +26,12 @@ urlpatterns = [
     path('api/courses/', include('courses.urls')),
     path('api/leads/', include('leads.urls')),
     path('api/blogs/', include('blog.urls')),
+    path('api/campaigns/', include('campaign.urls')),
     path('api/home/latest-blogs/', latest_blogs, name='home_latest_blogs'),
     path('api/enrollments/', include('enrollments.urls')),
     path('api/instructors/', include('instructors.urls')),
+    path('api/lead-management/', include('LeadManagement.urls')),
+    path('api/demo/', include('Demo.urls')),
     path('api/learning/', include('learning.urls')),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
  

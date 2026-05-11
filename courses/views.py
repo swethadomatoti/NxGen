@@ -102,12 +102,24 @@ class CourseListCreateView(APIView):
             courses = courses.filter(category_id=category_id)
 
         if request.user.is_authenticated:
+            # 🔥 NEW: Allow filtering by instructor_id (for Admins)
+            instructor_id = request.query_params.get('instructor_id')
+            
             if request.user.role == 'student':
                 from enrollments.models import Enrollment
                 enrolled_ids = Enrollment.objects.filter(
                     email=request.user.email, status='approved'
                 ).values_list('course_id', flat=True)
                 courses = courses.filter(id__in=enrolled_ids)
+            elif (request.user.is_superuser or request.user.role == 'admin') and instructor_id:
+                # Filter courses assigned to a specific instructor
+                from instructors.models import Instructor
+                try:
+                    instructor = Instructor.objects.get(id=instructor_id)
+                    assigned_ids = instructor.assigned_courses.values_list('id', flat=True)
+                    courses = courses.filter(id__in=assigned_ids)
+                except Instructor.DoesNotExist:
+                    courses = courses.none()
             elif request.user.role == 'instructor':
                 if hasattr(request.user, 'instructor'):
                     assigned_ids = request.user.instructor.assigned_courses.values_list('id', flat=True)
@@ -1259,8 +1271,16 @@ class InstructorAssignmentListView(APIView):
     def get(self, request):
         from .models import Assignment
         from accounts.models import User
+        
+        instructor_id = request.query_params.get('instructor_id')
+        course_id = request.query_params.get('course_id')
+        batch_id = request.query_params.get('batch_id')
+
+        # Base queryset
         if request.user.is_superuser or getattr(request.user, 'role', '') == User.ADMIN:
             assignments = Assignment.objects.all()
+            if instructor_id:
+                assignments = assignments.filter(instructor_id=instructor_id)
         else:
             instructor = getattr(request.user, 'instructor', None)
             if instructor:
@@ -1268,7 +1288,13 @@ class InstructorAssignmentListView(APIView):
             else:
                 assignments = Assignment.objects.none()
 
-        assignments = assignments.select_related('lesson__module__course')
+        # Apply cascading filters
+        if course_id:
+            assignments = assignments.filter(lesson__module__course_id=course_id)
+        if batch_id:
+            assignments = assignments.filter(batch_id=batch_id)
+
+        assignments = assignments.select_related('lesson__module__course').order_by('-assignment_due_date')
 
         data = []
         for assignment in assignments:
@@ -1310,6 +1336,7 @@ class BatchListCreateView(APIView):
     def get(self, request):
         batches = Batch.objects.filter(is_active=True).order_by('-created_at')
         instructor_id = request.query_params.get('instructor_id')
+        course_id = request.query_params.get('course_id')
         
         if request.user.is_authenticated:
             if getattr(request.user, 'role', '') == 'instructor' and not request.user.is_superuser:
@@ -1320,6 +1347,10 @@ class BatchListCreateView(APIView):
             elif request.user.is_superuser or getattr(request.user, 'role', '') == 'admin':
                 if instructor_id:
                     batches = batches.filter(instructor_id=instructor_id)
+            
+            # 🔥 NEW: Filter by course_id for cascading dropdown
+            if course_id:
+                batches = batches.filter(course_id=course_id)
         else:
             batches = batches.none() # Return nothing for unauthenticated
 
@@ -1432,6 +1463,27 @@ class ManageLiveClassView(APIView):
         from rest_framework.permissions import IsAuthenticated
         return [IsAuthenticated()]
 
+    def get(self, request, pk):
+        try:
+            batch = Batch.objects.get(pk=pk)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=404)
+
+        # Optionally check permissions for viewing (Student in batch, Assigned Instructor, Admin)
+        if getattr(request.user, 'role', '') == 'student':
+            if not batch.students.filter(id=request.user.id).exists():
+                return Response({'error': 'Not enrolled in this batch'}, status=403)
+        elif getattr(request.user, 'role', '') == 'instructor':
+            if not hasattr(request.user, 'instructor') or batch.instructor != request.user.instructor:
+                return Response({'error': 'Not assigned to this batch'}, status=403)
+
+        return Response({
+            'id': batch.id,
+            'name': batch.name,
+            'is_live_class_active': batch.is_live_class_active,
+            'live_link': batch.live_link if batch.is_live_class_active else None
+        })
+
     def post(self, request, pk):
         try:
             batch = Batch.objects.get(pk=pk)
@@ -1460,6 +1512,33 @@ class ManageLiveClassView(APIView):
             return Response({'message': 'Live class ended'})
 
         return Response({'error': 'Invalid action'}, status=400)
+
+    def put(self, request, pk):
+        try:
+            batch = Batch.objects.get(pk=pk)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=404)
+
+        if request.user.role == 'instructor':
+            if not hasattr(request.user, 'instructor') or batch.instructor != request.user.instructor:
+                return Response({'error': 'Not assigned to this batch'}, status=403)
+        elif request.user.role != 'admin' and not request.user.is_superuser:
+            return Response({'error': 'Permission denied'}, status=403)
+
+        is_active = request.data.get('is_live_class_active')
+        live_link = request.data.get('live_link')
+
+        if is_active is not None:
+            batch.is_live_class_active = str(is_active).lower() in ['true', '1', 't', 'y', 'yes']
+        if live_link is not None:
+            batch.live_link = live_link
+        
+        batch.save()
+        return Response({
+            'message': 'Live class updated successfully',
+            'is_live_class_active': batch.is_live_class_active,
+            'live_link': batch.live_link
+        })
 
 
 from .storage import get_signed_url

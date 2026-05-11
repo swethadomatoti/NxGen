@@ -1,10 +1,12 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
 from courses.models import Batch, Category, Course, Lesson, Module
+from courses.storage import get_signed_url
 from enrollments.models import Enrollment
 from instructors.models import Instructor
 
@@ -173,3 +175,25 @@ class AssignmentScopeRegressionTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.lesson_1.refresh_from_db()
 		self.assertEqual(self.lesson_1.title, "Updated Lesson")
+
+	@patch('courses.storage.cloudinary.api.resource')
+	@patch('courses.storage.cloudinary.utils.cloudinary_url')
+	def test_get_signed_url_for_raw_pdf_uses_attachment_false(self, mock_cloudinary_url, mock_resource):
+		mock_resource.return_value = {
+			'resource_type': 'raw',
+			'type': 'authenticated',
+			'format': 'pdf',
+		}
+		mock_cloudinary_url.return_value = ('https://res.cloudinary.com/demo/raw/upload/authenticated/sample.pdf?sig=123', {})
+
+		signed_url = get_signed_url('sample')
+
+		self.assertEqual(signed_url, 'https://res.cloudinary.com/demo/raw/upload/authenticated/sample.pdf?sig=123')
+		mock_cloudinary_url.assert_called_once()
+		_, kwargs = mock_cloudinary_url.call_args
+		self.assertEqual(kwargs['resource_type'], 'raw')
+		self.assertEqual(kwargs['type'], 'authenticated')
+		self.assertEqual(kwargs['sign_url'], True)
+		self.assertEqual(kwargs['flags'], 'attachment:false')
+		ssertEqual(kwargs['flags'], 'attachment:false')
+		self.assertEqual(kwargs['format'], 'pdf')

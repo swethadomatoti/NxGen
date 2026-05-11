@@ -22,38 +22,47 @@ def get_signed_url(public_id, resource_type=None):
     resource = None
     
     # Query Cloudinary directly to know exactly how it was stored
-    try:
-        resource = cloudinary.api.resource(public_id, resource_type='raw')
-    except NotFound:
-        try:
-            resource = cloudinary.api.resource(public_id, resource_type='image')
-        except NotFound:
+    for resource_type_candidate in ['raw', 'image', 'video']:
+        if resource:
+            break
+        for delivery_type_candidate in ['authenticated', 'upload']:
             try:
-                resource = cloudinary.api.resource(public_id, resource_type='video')
+                resource = cloudinary.api.resource(
+                    public_id,
+                    resource_type=resource_type_candidate,
+                    type=delivery_type_candidate,
+                )
+                break
             except NotFound:
-                pass
+                continue
 
     if resource:
         r_type = resource.get('resource_type', 'raw')
         delivery_type = resource.get('type', 'upload')
+        resource_format = resource.get('format')
         
         # Public ('upload') files do not require signing
         if delivery_type == 'upload':
             return resource.get('secure_url')
-            
+
         # Build signed URL for authenticated files
-        url, _ = cloudinary.utils.cloudinary_url(
-            public_id,
-            resource_type=r_type,
-            type='authenticated',
-            format=resource.get('format'),
-            sign_url=True
-        )
+        url_kwargs = {
+            'resource_type': r_type,
+            'type': 'authenticated',
+            'sign_url': True,
+        }
+
+        if resource_format:
+            url_kwargs['format'] = resource_format
+
+        if r_type == 'raw':
+            url_kwargs['flags'] = 'attachment:false'
+
+        url, _ = cloudinary.utils.cloudinary_url(public_id, **url_kwargs)
         return url
 
     # Fallback to local guessing if Cloudinary API check didn't find the resource
     if not resource_type:
-
         ext = public_id.split('.')[-1].lower() if '.' in public_id else ''
         if ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff']:
             resource_type = 'image'
@@ -62,15 +71,17 @@ def get_signed_url(public_id, resource_type=None):
         else:
             resource_type = 'raw'
 
-    # Ensure format extension is included if required by Cloudinary for signed RAW URLs
-    if resource_type == 'raw' and '.' not in public_id:
-        # Depending on storage, sometimes the public_id includes the extension for raw files
-        pass
+    url_kwargs = {
+        'resource_type': resource_type,
+        'type': 'authenticated',
+        'sign_url': True,
+    }
 
-    url, options = cloudinary.utils.cloudinary_url(
-        public_id,
-        resource_type=resource_type,
-        type='authenticated',
-        sign_url=True,
-    )
+    if resource_type == 'raw':
+        url_kwargs['flags'] = 'attachment:false'
+        ext = public_id.split('.')[-1].lower() if '.' in public_id else ''
+        if ext in ['pdf', 'docx', 'xlsx', 'csv', 'txt', 'zip']:
+            url_kwargs['format'] = ext
+
+    url, options = cloudinary.utils.cloudinary_url(public_id, **url_kwargs)
     return url

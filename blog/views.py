@@ -145,12 +145,18 @@ class AdminBlogDetailView(APIView):
 
     def put(self, request, id):
         blog = get_object_or_404(Blog, id=id, is_deleted=False)
-        serializer = BlogSerializer(blog, data=request.data, partial=True)
-
+        serializer = BlogSerializer(blog, data=request.data)  # Full update
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    def patch(self, request, id):
+        blog = get_object_or_404(Blog, id=id, is_deleted=False)
+        serializer = BlogSerializer(blog, data=request.data, partial=True) # Partial update
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, id):

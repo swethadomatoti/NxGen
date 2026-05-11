@@ -124,7 +124,7 @@ class InstructorCoursesView(APIView):
         data = [
             {
                 "id": batch.id,
-                "title": f"{batch.course.title} - {batch.name}",
+                "title": batch.course.title,
                 "description": getattr(batch.course, "description", ""),
                 "batch_name": batch.name,
                 "course_id": batch.course.id,
