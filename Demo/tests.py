@@ -301,13 +301,19 @@ class DemoScheduleTests(TestCase):
             format='json',
         )
 
-        self.assertEqual(response.status_code, 201)
-        new_demo_schedule = DemoSchedule.objects.get(pk=response.data['new_demo_schedule']['id'])
-        self.assertEqual(new_demo_schedule.status, DemoSchedule.STATUS_RESCHEDULED)
+        self.assertEqual(response.status_code, 200)
+        demo_schedule.refresh_from_db()
+        self.assertEqual(demo_schedule.status, DemoSchedule.STATUS_RESCHEDULED)
+        self.assertEqual(DemoSchedule.objects.filter(pk=demo_schedule.id).count(), 1)
+        # Compare date and time separately, ignoring microseconds
+        self.assertEqual(demo_schedule.scheduled_at.date(), scheduled_datetime.date())
+        db_time = demo_schedule.scheduled_at.replace(microsecond=0)
+        expected_time = scheduled_datetime.replace(microsecond=0)
+        self.assertEqual(db_time, expected_time)
 
         payload = {'attendance': [{'id': demo_lead_1.id, 'attended': True}, {'id': demo_lead_2.id, 'attended': True}]}
         response = self.client.post(
-            f'/api/demo/{new_demo_schedule.id}/attendance/',
+            f'/api/demo/{demo_schedule.id}/attendance/',
             data={
                 'attendance': [
                     {'id': demo_lead_1.id, 'attended': True},
@@ -318,8 +324,8 @@ class DemoScheduleTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        new_demo_schedule.refresh_from_db()
-        self.assertEqual(new_demo_schedule.status, DemoSchedule.STATUS_COMPLETED)
+        demo_schedule.refresh_from_db()
+        self.assertEqual(demo_schedule.status, DemoSchedule.STATUS_COMPLETED)
 
     def test_demo_schedule_reschedules_original_demo_status(self):
         demo_schedule = DemoSchedule.objects.create(
@@ -349,9 +355,82 @@ class DemoScheduleTests(TestCase):
             format='json',
         )
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 200)
         demo_schedule.refresh_from_db()
         self.assertEqual(demo_schedule.status, DemoSchedule.STATUS_RESCHEDULED)
+
+    def test_rescheduled_demo_attendance_allows_parent_chain_leads(self):
+        demo_schedule = DemoSchedule.objects.create(
+            campaign=self.campaign,
+            instructor=self.instructor,
+            scheduled_at=timezone.now() - timedelta(hours=1),
+            meeting_link='https://example.com/demo',
+            created_by=self.admin_user,
+        )
+        lead_one = Lead.objects.create(
+            fullname='Lead One',
+            email='lead1@example.com',
+            phone_number='1234567890',
+            status='interested',
+            campaign=self.campaign,
+        )
+        lead_two = Lead.objects.create(
+            fullname='Lead Two',
+            email='lead2@example.com',
+            phone_number='0987654321',
+            status='interested',
+            campaign=self.campaign,
+        )
+        demo_schedule.leads.add(lead_one, lead_two)
+
+        # Mark lead_one as attended and leave lead_two not attended.
+        self.client.post(
+            f'/api/demo/{demo_schedule.id}/attendance/',
+            data={
+                'attendance': [
+                    {'id': lead_one.id, 'attended': True},
+                    {'id': lead_two.id, 'attended': False},
+                ]
+            },
+            format='json',
+        )
+
+        response = self.client.post(
+            f'/api/demo/{demo_schedule.id}/reschedule/',
+            data={
+                'instructor_id': self.instructor.id,
+                'date': date.today().isoformat(),
+                'time': '13:00',
+                'meeting_link': 'https://example.com/rescheduled-demo',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+        demo_schedule.refresh_from_db()
+        self.assertEqual(demo_schedule.leads.count(), 2)
+        all_leads_in_chain = set(demo_schedule.get_all_leads().values_list('id', flat=True))
+        self.assertEqual(all_leads_in_chain, {lead_one.id, lead_two.id})
+
+        # Update the demo's scheduled time to past so we can mark attendance
+        demo_schedule.scheduled_at = timezone.now() - timedelta(hours=1)
+        demo_schedule.save()
+
+        payload = {
+            'attendance': [
+                {'id': lead_one.id, 'attended': True},
+                {'id': lead_two.id, 'attended': True},
+            ]
+        }
+        response = self.client.post(
+            f'/api/demo/{demo_schedule.id}/attendance/',
+            data=payload,
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        demo_schedule.refresh_from_db()
+        self.assertEqual(demo_schedule.status, DemoSchedule.STATUS_COMPLETED)
 
     def test_rescheduled_demo_leads_include_all_related_leads(self):
         demo_schedule = DemoSchedule.objects.create(
@@ -395,10 +474,12 @@ class DemoScheduleTests(TestCase):
             },
             format='json',
         )
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 200)
 
-        new_demo_id = response.data['new_demo_schedule']['id']
-        response = self.client.get(f'/api/demo/{new_demo_id}/leads/', format='json')
+        demo_schedule.refresh_from_db()
+        self.assertEqual(DemoSchedule.objects.filter(pk=demo_schedule.id).count(), 1)
+
+        response = self.client.get(f'/api/demo/{demo_schedule.id}/leads/', format='json')
         self.assertEqual(response.status_code, 200)
         self.assertEqual({lead['id'] for lead in response.data}, {lead_one.id, lead_two.id})
         self.assertTrue(all(lead['attended'] is False for lead in response.data))

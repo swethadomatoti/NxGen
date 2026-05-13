@@ -59,8 +59,15 @@ def _build_lead_reschedule_email_body(demo_schedule, lead, original_demo=None):
     scheduled_at_ist = _get_ist_scheduled_time(demo_schedule)
     original_details = ""
     if original_demo is not None:
-        original_at = _get_ist_scheduled_time(original_demo)
-        original_details = f"\nPrevious Demo:\nDate: {original_at.date()}\nTime: {original_at.time()}\nMeeting link: {original_demo.meeting_link}\n"
+        if isinstance(original_demo, dict):
+            original_at = original_demo['scheduled_at']
+            original_link = original_demo.get('meeting_link')
+        else:
+            original_at = _get_ist_scheduled_time(original_demo)
+            original_link = original_demo.meeting_link
+        original_details = (
+            f"\nPrevious Demo:\nDate: {original_at.date()}\nTime: {original_at.time()}\nMeeting link: {original_link}\n"
+        )
 
     return f"""
 Hi {lead.fullname},
@@ -85,8 +92,15 @@ def _build_instructor_reschedule_email_body(demo_schedule, total_leads, original
     scheduled_at_ist = _get_ist_scheduled_time(demo_schedule)
     original_details = ""
     if original_demo is not None:
-        original_at = _get_ist_scheduled_time(original_demo)
-        original_details = f"\nPrevious Demo:\nDate: {original_at.date()}\nTime: {original_at.time()}\nMeeting link: {original_demo.meeting_link}\n"
+        if isinstance(original_demo, dict):
+            original_at = original_demo['scheduled_at']
+            original_link = original_demo.get('meeting_link')
+        else:
+            original_at = _get_ist_scheduled_time(original_demo)
+            original_link = original_demo.meeting_link
+        original_details = (
+            f"\nPrevious Demo:\nDate: {original_at.date()}\nTime: {original_at.time()}\nMeeting link: {original_link}\n"
+        )
 
     return f"""
 Hello {demo_schedule.instructor.full_name},
@@ -214,7 +228,7 @@ def send_demo_schedule_emails(demo_schedule_id):
     return True
 
 
-def send_demo_reschedule_emails(demo_schedule_id, original_demo_id=None):
+def send_demo_reschedule_emails(demo_schedule_id, original_demo=None):
     demo_schedule = (
         DemoSchedule.objects
         .select_related('campaign', 'instructor')
@@ -227,9 +241,8 @@ def send_demo_reschedule_emails(demo_schedule_id, original_demo_id=None):
         logger.error("DemoSchedule not found for reschedule email send: %s", demo_schedule_id)
         return False
 
-    original_demo = None
-    if original_demo_id is not None:
-        original_demo = DemoSchedule.objects.filter(pk=original_demo_id).first()
+    if original_demo is not None and not isinstance(original_demo, dict):
+        original_demo = DemoSchedule.objects.filter(pk=original_demo).first()
 
     for lead in demo_schedule.leads.all():
         subject = f"Demo Rescheduled for {demo_schedule.campaign.name}"

@@ -160,8 +160,9 @@ class DemoScheduleAttendanceView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        valid_lead_ids = set(demo_schedule.get_all_leads().values_list('id', flat=True))
         for item in serializer.validated_data['attendance']:
-            if not demo_schedule.leads.filter(pk=item['id']).exists():
+            if item['id'] not in valid_lead_ids:
                 return Response(
                     {"error": f"Lead {item['id']} is not part of this demo."},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -288,15 +289,15 @@ class DemoScheduleDetailView(APIView):
 
 class RescheduleDemoView(APIView):
     """
-    Reschedule demo for leads who didn't attend but are interested.
-    Only creates a new demo schedule for non-attended leads.
+    Reschedule an existing demo schedule in place.
+    Updates the existing demo record instead of creating a new one.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
         """
         Return reschedule preview data for the requested demo.
-        Includes original demo details and eligible non-attended interested leads.
+        Includes existing demo details and eligible non-attended interested leads.
         """
         try:
             original_demo = DemoSchedule.objects.select_related(
@@ -342,8 +343,8 @@ class RescheduleDemoView(APIView):
 
     def post(self, request, pk):
         """
-        Create a new demo schedule for non-attended leads from a previous demo.
-        
+        Reschedule the existing demo in place for non-attended interested leads.
+
         Request body:
         {
             "instructor_id": 1 (or "instructor": "John Doe"),
@@ -406,36 +407,31 @@ class RescheduleDemoView(APIView):
                 status=status.HTTP_200_OK
             )
 
-        # Create new demo schedule for non-attended leads
+        # Update the existing demo schedule instead of creating a new record
         scheduled_at = datetime.combine(scheduled_date, scheduled_time)
+        original_demo_data = {
+            'scheduled_at': original_demo.scheduled_at,
+            'meeting_link': original_demo.meeting_link,
+        }
 
         try:
             with transaction.atomic():
-                new_demo_schedule = DemoSchedule.objects.create(
-                    campaign=original_demo.campaign,
-                    instructor=instructor,
-                    parent_demo=original_demo,
-                    scheduled_at=scheduled_at,
-                    meeting_link=meeting_link,
-                    status=DemoSchedule.STATUS_RESCHEDULED,
-                    created_by=request.user,
-                )
-                new_demo_schedule.leads.add(*non_attended_leads)
+                original_demo.instructor = instructor
+                original_demo.scheduled_at = scheduled_at
+                original_demo.meeting_link = meeting_link
                 original_demo.status = DemoSchedule.STATUS_RESCHEDULED
-                original_demo.save(update_fields=['status'])
+                original_demo.save(update_fields=['instructor', 'scheduled_at', 'meeting_link', 'status'])
                 logger.info(
-                    "Demo rescheduled: id=%s campaign=%s instructor=%s leads=%s "
-                    "original_demo=%s created_by=%s",
-                    new_demo_schedule.id,
+                    "Demo rescheduled in place: id=%s campaign=%s instructor=%s leads=%s created_by=%s",
+                    original_demo.id,
                     original_demo.campaign.id,
                     instructor.id,
                     total_leads,
-                    pk,
                     request.user.id,
                 )
         except Exception as exc:
             logger.exception(
-                "Failed to reschedule demo for original demo %s: %s",
+                "Failed to reschedule demo %s: %s",
                 pk,
                 exc,
             )
@@ -446,25 +442,25 @@ class RescheduleDemoView(APIView):
 
         # Send emails to rescheduled leads (async)
         try:
-            send_demo_reschedule_emails(new_demo_schedule.id, original_demo.id)
+            send_demo_reschedule_emails(original_demo.id, original_demo_data)
         except Exception as exc:
             logger.exception(
                 "Failed to send reschedule demo emails for demo %s: %s",
-                new_demo_schedule.id,
+                original_demo.id,
                 exc,
             )
 
         response_serializer = DemoScheduleSerializer(
-            new_demo_schedule,
+            original_demo,
             context={'request': request}
         )
         return Response(
             {
                 "message": "Demo rescheduled successfully",
                 "non_attended_leads_count": total_leads,
-                "new_demo_schedule": response_serializer.data,
+                "demo_schedule": response_serializer.data,
             },
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_200_OK,
         )
 
 
