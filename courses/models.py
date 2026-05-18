@@ -202,7 +202,7 @@ class Submission(models.Model):
 
 
 class Batch(models.Model):
-    name = models.CharField(max_length=255)
+    name = models.ForeignKey('campaign.Campaign', on_delete=models.CASCADE, related_name='batches', null=True, blank=True)
     description = models.TextField(blank=True, null=True)
     course = models.ForeignKey(
         Course,

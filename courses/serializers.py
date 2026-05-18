@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.db.models import Q
 from .models import Category, Course, CourseContent, Module, Lesson, Assignment, Submission, Batch
+from campaign.models import Campaign
 from .storage import get_signed_url
 
 
@@ -281,6 +282,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
 class BatchSerializer(serializers.ModelSerializer):
     students_detail = serializers.SerializerMethodField()
     course_title = serializers.ReadOnlyField(source='course.title')
+    name = serializers.SlugRelatedField(queryset=Campaign.objects.all(), slug_field='name', allow_null=True)
 
     class Meta:
         model = Batch

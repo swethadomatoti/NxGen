@@ -73,6 +73,27 @@ class Enrollment(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')                                                             
     is_active = models.BooleanField(default=False)
 
+    # 🔥 NEW FIELDS
+    enrollment_date = models.DateField(null=True, blank=True)
+    fee_status = models.CharField(
+        max_length=20, 
+        choices=[
+            ('Pending', 'Pending'),
+            ('Paid', 'Paid'),
+            ('Partially Paid', 'Partially Paid'),
+        ],
+        default='Pending'
+    )
+    
+    # Support for lead linking if needed
+    lead = models.ForeignKey(
+        'LeadManagement.Lead',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='enrolled_records'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -80,3 +101,11 @@ class Enrollment(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.course.title}"
+
+    @property
+    def full_name(self):
+        return self.name
+
+    @property
+    def phone_number(self):
+        return self.phone

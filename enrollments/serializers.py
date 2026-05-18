@@ -1,24 +1,71 @@
 from rest_framework import serializers
 from .models import Enrollment
+from courses.models import Course
 
+
+from LeadManagement.models import Lead
 
 class EnrollmentSerializer(serializers.ModelSerializer):
+    full_name = serializers.ReadOnlyField()
+    phone_number = serializers.ReadOnlyField()
+    course_title = serializers.ReadOnlyField(source='course.title')
+    course = serializers.SlugRelatedField(
+        queryset=Course.objects.all(),
+        slug_field='title',
+        required=False
+    )
+    
+    # Alias for lead_id input
+    lead_id = serializers.PrimaryKeyRelatedField(
+        queryset=Lead.objects.all(),
+        source='lead',
+        required=False,
+        write_only=True
+    )
+
     class Meta:
         model = Enrollment
         fields = "__all__"
         read_only_fields = ["status", "is_active"]
 
     def validate(self, data):
+        # 1. Lead lookup by email if not provided
+        email = data.get('email')
+        lead = data.get('lead')
+        
+        if not lead and email:
+            lead = Lead.objects.filter(email=email).first()
+            if lead:
+                data['lead'] = lead
+
+        # 2. Existing validations
         if not data.get("terms_accepted"):
             raise serializers.ValidationError("You must accept terms & conditions")
 
         if Enrollment.objects.filter(
             email=data.get("email"),
             course=data.get("course")
-        ).exists():
+        ).exclude(id=self.instance.id if self.instance else None).exists():
             raise serializers.ValidationError("Already enrolled for this course")
 
         return data
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        # If lead is null in DB, try to find it by email on the fly
+        if ret.get('lead') is None and instance.email:
+            lead = Lead.objects.filter(email=instance.email).first()
+            if lead:
+                ret['lead'] = lead.id
+                # Fix it in the database so it's persistent for next time
+                instance.lead = lead
+                instance.save(update_fields=['lead'])
+        
+        # Replace course ID with course title
+        if instance.course:
+            ret['course'] = instance.course.title
+            
+        return ret
 
 from courses.models import Lesson
 from learning.models import LessonProgress

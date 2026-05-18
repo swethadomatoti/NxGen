@@ -1337,6 +1337,8 @@ class BatchListCreateView(APIView):
         batches = Batch.objects.filter(is_active=True).order_by('-created_at')
         instructor_id = request.query_params.get('instructor_id')
         course_id = request.query_params.get('course_id')
+        batch_name = request.query_params.get('batch_name')
+        course_name = request.query_params.get('course_name')
         
         if request.user.is_authenticated:
             if getattr(request.user, 'role', '') == 'instructor' and not request.user.is_superuser:
@@ -1351,6 +1353,14 @@ class BatchListCreateView(APIView):
             # 🔥 NEW: Filter by course_id for cascading dropdown
             if course_id:
                 batches = batches.filter(course_id=course_id)
+            
+            # 🔥 NEW: Filter by Campaign Name (Batch Name)
+            if batch_name:
+                batches = batches.filter(name__name__icontains=batch_name)
+            
+            # 🔥 NEW: Filter by Course Title
+            if course_name:
+                batches = batches.filter(course__title__icontains=course_name)
         else:
             batches = batches.none() # Return nothing for unauthenticated
 

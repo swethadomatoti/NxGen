@@ -232,7 +232,7 @@ def send_demo_reschedule_emails(demo_schedule_id, original_demo=None):
     demo_schedule = (
         DemoSchedule.objects
         .select_related('campaign', 'instructor')
-        .prefetch_related('leads')
+        .prefetch_related('leads', 'demo_attendances')
         .filter(pk=demo_schedule_id)
         .first()
     )
@@ -244,7 +244,17 @@ def send_demo_reschedule_emails(demo_schedule_id, original_demo=None):
     if original_demo is not None and not isinstance(original_demo, dict):
         original_demo = DemoSchedule.objects.filter(pk=original_demo).first()
 
-    for lead in demo_schedule.leads.all():
+    attendance_map = {
+        attendance.lead_id: attendance
+        for attendance in demo_schedule.demo_attendances.all()
+    }
+    
+    target_leads = [
+        lead for lead in demo_schedule.leads.all()
+        if (not attendance_map.get(lead.id) or not attendance_map[lead.id].attended) and lead.status == 'interested'
+    ]
+
+    for lead in target_leads:
         subject = f"Demo Rescheduled for {demo_schedule.campaign.name}"
         text_body = _build_lead_reschedule_email_body(demo_schedule, lead, original_demo)
         html_body = f"""
@@ -288,7 +298,7 @@ def send_demo_reschedule_emails(demo_schedule_id, original_demo=None):
             )
 
     subject = f"Demo Rescheduled: {demo_schedule.campaign.name}"
-    text_body = _build_instructor_reschedule_email_body(demo_schedule, demo_schedule.leads.count(), original_demo)
+    text_body = _build_instructor_reschedule_email_body(demo_schedule, len(target_leads), original_demo)
     html_body = f"""
 <html>
   <body style="font-family: Arial, sans-serif; color: #333;">
@@ -302,7 +312,7 @@ def send_demo_reschedule_emails(demo_schedule_id, original_demo=None):
           <p style="margin: 0 0 8px 0;">Date: { _get_ist_scheduled_time(demo_schedule).date() }</p>
           <p style="margin: 0 0 8px 0;">Time: { _get_ist_scheduled_time(demo_schedule).time() }</p>
           <p style="margin: 0 0 8px 0;">Meeting link: <a href="{demo_schedule.meeting_link}" style="color: #1a73e8; text-decoration: none;">Join demo</a></p>
-          <p style="margin: 0;">Total interested leads: {demo_schedule.leads.count()}</p>
+          <p style="margin: 0;">Total interested leads: {len(target_leads)}</p>
         </div>
       </div>
       <p style="margin-top: 16px;">Please review the leads and join on time.</p>
@@ -331,7 +341,7 @@ def send_demo_reschedule_emails(demo_schedule_id, original_demo=None):
     logger.info(
         "Completed DemoSchedule reschedule email send %s: lead_count=%s instructor=%s",
         demo_schedule.id,
-        demo_schedule.leads.count(),
+        len(target_leads),
         demo_schedule.instructor.email,
     )
     return True

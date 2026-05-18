@@ -34,9 +34,15 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-1%6x%xl!+vk@08^=)tm
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', '*').split(',')
-
 AUTH_USER_MODEL = 'accounts.User'
+
+# Default development hosts for Django local and LAN access
+DEFAULT_ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '192.168.0.249',
+    '0.0.0.0',
+]
 
 
 def _database_config_from_url(database_url: str) -> dict:
@@ -72,6 +78,13 @@ REST_FRAMEWORK = {
 # Only URLs with trailing slash will match patterns with trailing slash
 APPEND_SLASH = False
 
+allowed_hosts_env = os.getenv('DJANGO_ALLOWED_HOSTS')
+if allowed_hosts_env:
+    env_hosts = [host.strip() for host in allowed_hosts_env.split(',') if host.strip()]
+    ALLOWED_HOSTS = list(dict.fromkeys(env_hosts + DEFAULT_ALLOWED_HOSTS))
+else:
+    ALLOWED_HOSTS = DEFAULT_ALLOWED_HOSTS
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -91,11 +104,13 @@ INSTALLED_APPS = [
     'LeadManagement.apps.LeadmanagementConfig',
     'blog',
     'campaign',
-    'enrollments',
+    'enrollments.apps.EnrollmentsConfig',
+    'Enroll',
     'Demo',
     'django_celery_results',
     'instructors',
     'learning',
+    'Dashboard',
 ]
 
 MIDDLEWARE = [

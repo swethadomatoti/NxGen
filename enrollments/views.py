@@ -30,7 +30,7 @@ import razorpay
 User = get_user_model()
 
 
-# ---------------- ENROLL ---------------- #
+# ----------------ENROLL View---------------- #
 
 class EnrollView(APIView):
 
@@ -39,7 +39,7 @@ class EnrollView(APIView):
         serializer = EnrollmentSerializer(data=request.data)
 
         if serializer.is_valid():
-            try:
+            try: 
                 enrollment = serializer.save()
 
                 email_warning = None
@@ -74,7 +74,7 @@ class EnrollView(APIView):
    
 
     
-# ---------------- LIST ---------------- #
+# ---------------- Enrollment LIST ---------------- #
 
 class EnrollmentListView(APIView):
     def get(self, request):
@@ -202,9 +202,9 @@ class RejectEnrollmentView(APIView):
 
 
 
-
-
-
+#_________________________________________________
+#           Razorpay
+#_________________________________________________
 
 
 class CreateOrderView(APIView):
@@ -272,6 +272,9 @@ class VerifyPaymentView(APIView):
             return Response({
                 "error": "Payment verification failed"
             }, status=400)
+
+#**********Student CoursesView**********************
+           
 from rest_framework.permissions import IsAuthenticated
 from .serializers import StudentEnrolledCourseSerializer
 from learning.models import LessonProgress
@@ -284,7 +287,9 @@ class StudentCoursesView(APIView):
         enrollments = Enrollment.objects.filter(email=email, status='approved', is_active=True)
         serializer = StudentEnrolledCourseSerializer(enrollments, many=True, context={'request': request})
         return Response(serializer.data)
-
+#----------------------------------------------
+# StudentDashboardStatsView
+#----------------------------------------------
 class StudentDashboardStatsView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
@@ -307,3 +312,80 @@ class StudentDashboardStatsView(APIView):
             'next_live_session': 'Saturday, 10:00 AM',
             'active_live_classes': active_live_classes
         })
+
+# ---------------- CHOICE VIEWS ---------------- #
+
+class FeeStatusChoicesView(APIView):
+    def get(self, request):
+        return Response([{"key": c[0], "label": c[1]} for c in [
+            ('Pending', 'Pending'),
+            ('Paid', 'Paid'),
+            ('Partially Paid', 'Partially Paid'),
+        ]])
+
+class StatusChoicesView(APIView):
+    def get(self, request):
+        return Response([{"key": c[0], "label": c[1]} for c in Enrollment.STATUS_CHOICES])
+
+class CourseTypeChoicesView(APIView):
+    def get(self, request):
+        return Response([{"key": c[0], "label": c[1]} for c in Enrollment.COURSE_TYPE_CHOICES])
+
+class ModeChoicesView(APIView):
+    def get(self, request):
+        return Response([{"key": c[0], "label": c[1]} for c in Enrollment.MODE_CHOICES])
+
+class TimingChoicesView(APIView):
+    def get(self, request):
+        return Response([{"key": c[0], "label": c[1]} for c in Enrollment.TIMING_CHOICES])
+
+class ExperienceChoicesView(APIView):
+    def get(self, request):
+        return Response([{"key": c[0], "label": c[1]} for c in Enrollment.EXPERIENCE_CHOICES])
+
+class CurrentStatusChoicesView(APIView):
+    def get(self, request):
+        return Response([{"key": c[0], "label": c[1]} for c in Enrollment.CURRENT_STATUS_CHOICES])
+
+# ---------------- DETAIL CRUD ---------------- #
+
+class EnrollmentDetailCRUDView(APIView):
+    def get_object(self, id):
+        try:
+            return Enrollment.objects.get(id=id)
+        except Enrollment.DoesNotExist:
+            return None
+
+    def get(self, request, id):
+        enrollment = self.get_object(id)
+        if not enrollment:
+            return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = EnrollmentSerializer(enrollment)
+        return Response(serializer.data)
+
+    def put(self, request, id):
+        enrollment = self.get_object(id)
+        if not enrollment:
+            return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = EnrollmentSerializer(enrollment, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, id):
+        enrollment = self.get_object(id)
+        if not enrollment:
+            return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = EnrollmentSerializer(enrollment, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, id):
+        enrollment = self.get_object(id)
+        if not enrollment:
+            return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        enrollment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
