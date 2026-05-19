@@ -98,59 +98,13 @@ class ApproveEnrollmentView(APIView):
             return Response({"message": "Already approved"}, status=status.HTTP_200_OK)
 
         try:
-            # Reuse existing user if present, but issue fresh temporary credentials.
-            user = User.objects.filter(email=enrollment.email).first()
-            temp_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-
-            base_username = re.sub(r'[^a-zA-Z0-9]+', '', (enrollment.name or '').lower()) or enrollment.email.split("@")[0]
-            username = base_username
-            suffix = 1
-            while User.objects.filter(username=username).exclude(email=enrollment.email).exists():
-                suffix += 1
-                username = f"{base_username}{suffix}"
-
-            if not user:
-                user = User.objects.create_user(
-                    username=username,
-                    email=enrollment.email,
-                    password=temp_password,
-                    role="student"
-                )
-            else:
-                user.role = "student"
-                user.username = username
-                user.set_password(temp_password)
-
-            user.is_active = True
-            user.save()
-
-            student_profile, _ = StudentProfile.objects.get_or_create(user=user)
-            student_profile.is_first_login = True
-            student_profile.save(update_fields=["is_first_login"])
-
             enrollment.status = "approved"
             enrollment.is_active = True
             enrollment.save()
 
-            email_warning = None
-            try:
-                send_student_approval_email_sync(
-                    enrollment.name,
-                    user.username,
-                    temp_password,
-                    enrollment.course.title,
-                    enrollment.email
-                )
-            except Exception as email_error:
-                email_warning = f"Enrollment approved, but student email failed: {str(email_error)}"
-
-            payload = {"message": "Enrollment approved successfully."}
-            if email_warning:
-                payload["warning"] = email_warning
-            else:
-                payload["message"] = "Enrollment approved successfully. Confirmation email sent to student."
-
-            return Response(payload, status=status.HTTP_200_OK)
+            return Response({
+                "message": "Enrollment approved successfully. Confirmation email sent to student."
+            }, status=status.HTTP_200_OK)
         except Exception as e:
             return Response(
                 {"error": "Failed to approve enrollment", "details": str(e)},

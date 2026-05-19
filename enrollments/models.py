@@ -109,3 +109,78 @@ class Enrollment(models.Model):
     @property
     def phone_number(self):
         return self.phone
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._original_status = self.status
+
+
+# --- Signal to handle approval, user creation, and credentials email ---
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.contrib.auth import get_user_model
+from accounts.models import StudentProfile
+import random
+import string
+import re
+import logging
+from .tasks import send_student_approval_email_sync
+
+logger = logging.getLogger(__name__)
+
+@receiver(post_save, sender=Enrollment)
+def handle_enrollment_approval(sender, instance, created, **kwargs):
+    if instance.status == 'approved' and (created or getattr(instance, '_original_status', None) != 'approved'):
+        User = get_user_model()
+        try:
+            user = User.objects.filter(email=instance.email).first()
+            temp_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+
+            base_username = re.sub(r'[^a-zA-Z0-9]+', '', (instance.name or '').lower()) or instance.email.split("@")[0]
+            username = base_username
+            suffix = 1
+            while User.objects.filter(username=username).exclude(email=instance.email).exists():
+                suffix += 1
+                username = f"{base_username}{suffix}"
+
+            if not user:
+                user = User.objects.create_user(
+                    username=username,
+                    email=instance.email,
+                    password=temp_password,
+                    role="student"
+                )
+            else:
+                user.role = "student"
+                user.username = username
+                user.set_password(temp_password)
+
+            user.is_active = True
+            user.save()
+
+            student_profile, _ = StudentProfile.objects.get_or_create(user=user)
+            student_profile.is_first_login = True
+            student_profile.save(update_fields=["is_first_login"])
+
+            # Ensure instance is active
+            if not instance.is_active:
+                instance.is_active = True
+                instance.save(update_fields=['is_active'])
+
+            try:
+                send_student_approval_email_sync(
+                    instance.name,
+                    user.username,
+                    temp_password,
+                    instance.course.title,
+                    instance.email
+                )
+                logger.info(f"Student approval email sent successfully to {instance.email}")
+            except Exception as email_error:
+                logger.error(f"Enrollment approved, but student email failed: {str(email_error)}")
+
+        except Exception as e:
+            logger.error(f"Failed to process enrollment approval for {instance.email}: {str(e)}")
+
+        # Update original status so it doesn't fire again on subsequent saves in this instance
+        instance._original_status = 'approved'

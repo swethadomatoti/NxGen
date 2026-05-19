@@ -136,6 +136,8 @@ def sync_to_enrollments_app(sender, instance, **kwargs):
                 'enrollment_date': instance.enrollment_date,
                 'fee_status': instance.fee_status,
                 'lead': instance.lead,
+                'status': instance.status,
+                'is_active': instance.is_active,
             }
         )
         
@@ -153,4 +155,6 @@ def sync_to_enrollments_app(sender, instance, **kwargs):
             enrolled_record.enrollment_date = instance.enrollment_date
             enrolled_record.fee_status = instance.fee_status
             enrolled_record.lead = instance.lead
+            enrolled_record.status = instance.status
+            enrolled_record.is_active = instance.is_active
             enrolled_record.save()
