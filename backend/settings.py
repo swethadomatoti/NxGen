@@ -108,6 +108,7 @@ INSTALLED_APPS = [
     'Enroll',
     'Demo',
     'django_celery_results',
+    'django_celery_beat',
     'instructors',
     'learning',
     'Dashboard',
