@@ -15,7 +15,8 @@ from .views import (
     ModeChoicesView,
     TimingChoicesView,
     ExperienceChoicesView,
-    CurrentStatusChoicesView
+    CurrentStatusChoicesView,
+    EnrollmentPaymentDetailView
 )
 
 urlpatterns = [
@@ -23,7 +24,7 @@ urlpatterns = [
     path('student/courses/', StudentCoursesView.as_view()),
     path('student/dashboard-stats/', StudentDashboardStatsView.as_view()),
     path('', EnrollmentListView.as_view()),
-    path('<int:id>/', EnrollmentDetailCRUDView.as_view()), # CRUD operations
+    path('<int:id>/', EnrollmentDetailCRUDView.as_view()), 
     path('<int:id>/approve/', ApproveEnrollmentView.as_view()),
     path('<int:id>/reject/', RejectEnrollmentView.as_view()),
     path('create-order/', CreateOrderView.as_view()),
@@ -37,4 +38,7 @@ urlpatterns = [
     path('choices/timing/', TimingChoicesView.as_view()),
     path('choices/experience/', ExperienceChoicesView.as_view()),
     path('choices/current-status/', CurrentStatusChoicesView.as_view()),
+    
+    # Payment Details URLs
+    path('<int:enrollment_id>/payment-details/', EnrollmentPaymentDetailView.as_view()),
 ]

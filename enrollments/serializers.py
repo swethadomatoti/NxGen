@@ -1,9 +1,18 @@
 from rest_framework import serializers
-from .models import Enrollment
+from .models import Enrollment, PaymentDetail
 from courses.models import Course
 
 
 from LeadManagement.models import Lead
+
+class PaymentDetailSerializer(serializers.ModelSerializer):
+    course_name = serializers.CharField(source='enrollment.course.title', read_only=True)
+    enrollment_name = serializers.CharField(source='enrollment.name', read_only=True)
+    class Meta:
+        model = PaymentDetail
+        fields = '__all__'
+        read_only_fields = ['remaining_balance']
+
 
 class EnrollmentSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
@@ -22,11 +31,23 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         required=False,
         write_only=True
     )
+    
+    # Read-only nested payment details
+    payment_details = PaymentDetailSerializer(source='payment_detail', read_only=True)
+    
+    # Or to fetch from related_name='payment_details' (which returns a queryset) we can use a SerializerMethodField
+    payment_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = Enrollment
         fields = "__all__"
         read_only_fields = ["status", "is_active"]
+
+    def get_payment_detail(self, obj):
+        payment = obj.payment_details.first()
+        if payment:
+            return PaymentDetailSerializer(payment).data
+        return None
 
     def validate(self, data):
         # 1. Lead lookup by email if not provided

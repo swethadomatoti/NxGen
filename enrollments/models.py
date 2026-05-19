@@ -128,6 +128,33 @@ from .tasks import send_student_approval_email_sync
 
 logger = logging.getLogger(__name__)
 
+class PaymentDetail(models.Model):
+    enrollment = models.ForeignKey(
+        Enrollment, 
+        on_delete=models.CASCADE, 
+        related_name="payment_details"
+    )
+    fee_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    payment_paid = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    remaining_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        # 1. If fee_amount is 0.0 or not set, get it from the Course price
+        if not self.fee_amount and self.enrollment and self.enrollment.course:
+            self.fee_amount = self.enrollment.course.price
+
+        # 2. Automatically calculate the remaining balance
+        if self.fee_amount is not None and self.payment_paid is not None:
+            self.remaining_balance = float(self.fee_amount) - float(self.payment_paid)
+            
+        super().save(*args, **kwargs)
+    def __str__(self):
+        return f"Payment for {self.enrollment.name} - {self.payment_paid}"
+
+
 @receiver(post_save, sender=Enrollment)
 def handle_enrollment_approval(sender, instance, created, **kwargs):
     if instance.status == 'approved' and (created or getattr(instance, '_original_status', None) != 'approved'):

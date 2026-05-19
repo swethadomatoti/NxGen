@@ -17,8 +17,8 @@ from .tasks import (
 import hmac
 import hashlib
 from django.utils import timezone
-from .models import Enrollment
-from .serializers import EnrollmentSerializer
+from .models import Enrollment, PaymentDetail
+from .serializers import EnrollmentSerializer, PaymentDetailSerializer
 from accounts.models import StudentProfile
 
 
@@ -342,4 +342,89 @@ class EnrollmentDetailCRUDView(APIView):
         if not enrollment:
             return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         enrollment.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------- PAYMENT DETAILS CRUD ---------------- #
+
+class EnrollmentPaymentDetailView(APIView):
+    def get(self, request, enrollment_id):
+        try:
+            enrollment = Enrollment.objects.get(id=enrollment_id)
+        except Enrollment.DoesNotExist:
+            return Response({"error": "Enrollment not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Get existing payment details or create a default one (which triggers auto-calculation of fees)
+        payment, created = PaymentDetail.objects.get_or_create(enrollment=enrollment)
+        
+        serializer = PaymentDetailSerializer(payment)
+        return Response(serializer.data)
+
+    def post(self, request, enrollment_id):
+        try:
+            enrollment = Enrollment.objects.get(id=enrollment_id)
+        except Enrollment.DoesNotExist:
+            return Response({"error": "Enrollment not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        payment = PaymentDetail.objects.filter(enrollment=enrollment).first()
+        
+        if payment:
+            # Update existing
+            serializer = PaymentDetailSerializer(payment, data=request.data, partial=True)
+        else:
+            # Create new
+            data = request.data.copy()
+            data['enrollment'] = enrollment.id
+            serializer = PaymentDetailSerializer(data=data)
+            
+        if serializer.is_valid():
+            serializer.save()
+            # Also update the enrollment fee status if needed
+            if 'payment_paid' in request.data:
+                # Basic logic to update fee_status based on payment
+                try:
+                    paid = float(serializer.instance.payment_paid)
+                    fee = float(serializer.instance.fee_amount)
+                    if paid >= fee and fee > 0:
+                        enrollment.fee_status = 'Paid'
+                    elif paid > 0:
+                        enrollment.fee_status = 'Partially Paid'
+                    else:
+                        enrollment.fee_status = 'Pending'
+                    enrollment.save(update_fields=['fee_status'])
+                except (ValueError, TypeError):
+                    pass
+                    
+            return Response(serializer.data, status=status.HTTP_200_OK if payment else status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request, enrollment_id):
+        payment = PaymentDetail.objects.filter(enrollment_id=enrollment_id).first()
+        if not payment:
+            return Response({"error": "Payment details not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        serializer = PaymentDetailSerializer(payment, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, enrollment_id):
+        payment = PaymentDetail.objects.filter(enrollment_id=enrollment_id).first()
+        if not payment:
+            return Response({"error": "Payment details not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        serializer = PaymentDetailSerializer(payment, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, enrollment_id):
+        payment = PaymentDetail.objects.filter(enrollment_id=enrollment_id).first()
+        if not payment:
+            return Response({"error": "Payment details not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        payment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
