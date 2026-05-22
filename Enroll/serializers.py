@@ -22,6 +22,9 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         required=False,
         write_only=True
     )
+    
+    # New field to show all courses the student is enrolled in
+    all_enrolled_courses = serializers.SerializerMethodField()
 
     class Meta:
         model = Enrollment
@@ -33,6 +36,21 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             'phone_number': {'required': False, 'allow_null': True, 'allow_blank': True},
             'lead': {'required': False},
         }
+
+    def get_all_enrolled_courses(self, obj):
+        if obj.email:
+            enrollments = Enrollment.objects.filter(email=obj.email).select_related('course')
+            return [
+                {
+                    "enrollment_id": e.id,
+                    "course_id": e.course.id if e.course else None,
+                    "course_title": e.course.title if e.course else None,
+                    "status": e.status,
+                    "fee_status": e.fee_status,
+                }
+                for e in enrollments
+            ]
+        return []
 
     def validate(self, attrs):
         # 1. Handle 'fullname' alias if provided

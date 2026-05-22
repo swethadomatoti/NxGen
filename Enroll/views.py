@@ -28,11 +28,39 @@ class EnrollmentListCreateView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        serializer = EnrollmentSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        courses = request.data.get('courses')
+        course = request.data.get('course')
+        
+        # Determine the courses to process
+        if courses and isinstance(courses, list):
+            course_list = courses
+        elif course:
+            course_list = [course]
+        else:
+            return Response({"error": "No course provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        created_enrollments = []
+        errors = []
+
+        for c in course_list:
+            data = request.data.copy()
+            data['course'] = c
+            if 'courses' in data:
+                del data['courses']
+
+            serializer = EnrollmentSerializer(data=data)
+            if serializer.is_valid():
+                serializer.save()
+                created_enrollments.append(serializer.data)
+            else:
+                errors.append({"course": c, "errors": serializer.errors})
+
+        if errors and not created_enrollments:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        if errors and created_enrollments:
+            return Response({"created": created_enrollments, "errors": errors}, status=status.HTTP_207_MULTI_STATUS)
+            
+        return Response(created_enrollments if courses else created_enrollments[0], status=status.HTTP_201_CREATED)
 
 
 class EnrollmentDetailView(APIView):

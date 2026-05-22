@@ -151,6 +151,21 @@ class PaymentDetail(models.Model):
             self.remaining_balance = float(self.fee_amount) - float(self.payment_paid)
             
         super().save(*args, **kwargs)
+
+        # 3. Update the associated Enrollment's fee_status
+        if self.enrollment:
+            if float(self.payment_paid) <= 0:
+                new_status = 'Pending'
+            elif float(self.remaining_balance) <= 0:
+                new_status = 'Paid'
+            else:
+                new_status = 'Partially Paid'
+            
+            if self.enrollment.fee_status != new_status:
+                self.enrollment.fee_status = new_status
+                # We use update_fields so we don't trigger unnecessary save logic loops in Enrollment
+                self.enrollment.save(update_fields=['fee_status'])
+
     def __str__(self):
         return f"Payment for {self.enrollment.name} - {self.payment_paid}"
 

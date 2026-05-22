@@ -282,11 +282,64 @@ class SubmissionSerializer(serializers.ModelSerializer):
 class BatchSerializer(serializers.ModelSerializer):
     students_detail = serializers.SerializerMethodField()
     course_title = serializers.ReadOnlyField(source='course.title')
-    name = serializers.SlugRelatedField(queryset=Campaign.objects.all(), slug_field='name', allow_null=True)
+    
+    # Accept the string from the frontend and represent it as a string
+    name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    
+    # New fields to satisfy the requirement
+    campaign_name = serializers.ReadOnlyField(source='name.name')
+    campaign_course_name = serializers.ReadOnlyField(source='name.course.title')
+    enrolled_students = serializers.SerializerMethodField()
 
     class Meta:
         model = Batch
         fields = "__all__"
+
+    def create(self, validated_data):
+        from campaign.models import Campaign
+        from datetime import date, timedelta
+        
+        # intercept the name string
+        name_str = validated_data.pop('name', None)
+        # auto-create or fetch the campaign if a name was provided
+        campaign_obj = None
+        if name_str:
+            course = validated_data.get('course')
+            campaign_obj, created = Campaign.objects.get_or_create(
+                name=name_str,
+                defaults={
+                    'start_date': date.today(),
+                    'end_date': date.today() + timedelta(days=30),
+                    'status': 'active',
+                    'course': course
+                }
+            )
+        
+        batch = Batch.objects.create(name=campaign_obj, **validated_data)
+        return batch
+
+    def update(self, instance, validated_data):
+        from campaign.models import Campaign
+        from datetime import date, timedelta
+
+        name_str = validated_data.pop('name', None)
+        if name_str is not None:
+            course = validated_data.get('course', instance.course)
+            campaign_obj, created = Campaign.objects.get_or_create(
+                name=name_str,
+                defaults={
+                    'start_date': date.today(),
+                    'end_date': date.today() + timedelta(days=30),
+                    'status': 'active',
+                    'course': course
+                }
+            )
+            instance.name = campaign_obj
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
 
     def get_students_detail(self, obj):
         return [
@@ -296,6 +349,24 @@ class BatchSerializer(serializers.ModelSerializer):
                 "email": s.email,
             }
             for s in obj.students.all()
+        ]
+
+    def get_enrolled_students(self, obj):
+        from enrollments.models import Enrollment
+        if not obj.course:
+            return []
+        
+        # Fetch enrollments for this batch's course
+        enrollments = Enrollment.objects.filter(course=obj.course)
+        return [
+            {
+                "id": e.id,
+                "name": e.name,
+                "email": e.email,
+                "phone": e.phone,
+                "status": e.status,
+            }
+            for e in enrollments
         ]
 
     def validate(self, attrs):

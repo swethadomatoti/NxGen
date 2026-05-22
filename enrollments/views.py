@@ -35,41 +35,69 @@ User = get_user_model()
 class EnrollView(APIView):
 
     def post(self, request):
+        courses = request.data.get('courses')
+        course = request.data.get('course')
 
-        serializer = EnrollmentSerializer(data=request.data)
+        if courses and isinstance(courses, list):
+            course_list = courses
+        elif course:
+            course_list = [course]
+        else:
+            return Response({"error": "No course provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if serializer.is_valid():
-            try: 
-                enrollment = serializer.save()
+        created_enrollments = []
+        errors = []
+        email_warnings = []
 
-                email_warning = None
-                try:
-                    send_admin_enrollment_email_sync(
-                        enrollment.name,
-                        enrollment.email,
-                        enrollment.course.title,
-                        enrollment.phone
-                    )
-                except Exception as email_error:
-                    email_warning = f"Enrollment created, but admin notification email failed: {str(email_error)}"
+        for c in course_list:
+            data = request.data.copy()
+            data['course'] = c
+            if 'courses' in data:
+                del data['courses']
 
-                payload = {
-                    "message": "Enrollment successful",
-                    "enrollment_id": enrollment.id,
-                    "redirect": "payment"
-                }
+            serializer = EnrollmentSerializer(data=data)
 
-                if email_warning:
-                    payload["warning"] = email_warning
+            if serializer.is_valid():
+                try: 
+                    enrollment = serializer.save()
 
-                return Response(payload, status=status.HTTP_201_CREATED)
-            except Exception as e:
-                return Response(
-                    {"error": "Failed to create enrollment", "details": str(e)},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+                    try:
+                        send_admin_enrollment_email_sync(
+                            enrollment.name,
+                            enrollment.email,
+                            enrollment.course.title,
+                            enrollment.phone
+                        )
+                    except Exception as email_error:
+                        email_warnings.append(f"Notification error for {c}: {str(email_error)}")
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                    created_enrollments.append(enrollment)
+                except Exception as e:
+                    errors.append({"course": c, "error": "Failed to create enrollment", "details": str(e)})
+            else:
+                errors.append({"course": c, "errors": serializer.errors})
+
+        if errors and not created_enrollments:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Build response payload
+        payload = {
+            "message": "Enrollment successful",
+            "enrollments": [e.id for e in created_enrollments],
+            "redirect": "payment"
+        }
+        
+        # Maintain backward compatibility for single course response
+        if len(created_enrollments) == 1:
+            payload["enrollment_id"] = created_enrollments[0].id
+            
+        if email_warnings:
+            payload["warnings"] = email_warnings
+        if errors:
+            payload["errors"] = errors
+            return Response(payload, status=status.HTTP_207_MULTI_STATUS)
+
+        return Response(payload, status=status.HTTP_201_CREATED)
 
    
 
@@ -196,6 +224,7 @@ class VerifyPaymentView(APIView):
         razorpay_payment_id = data.get("razorpay_payment_id")
         razorpay_signature = data.get("razorpay_signature")
         enrollment_id = data.get("enrollment_id")
+        enrollment_ids = data.get("enrollment_ids")
 
         # 🔒 Generate signature
         generated_signature = hmac.new(
@@ -206,20 +235,27 @@ class VerifyPaymentView(APIView):
 
         # ✅ Verify payment
         if generated_signature == razorpay_signature:
+            # Handle multiple or single enrollments
+            ids_to_update = enrollment_ids if enrollment_ids else ([enrollment_id] if enrollment_id else [])
+            
+            if not ids_to_update:
+                return Response({"error": "No enrollment ID provided"}, status=400)
 
-            try:
-                enrollment = Enrollment.objects.get(id=enrollment_id)
-            except Enrollment.DoesNotExist:
-                return Response({"error": "Enrollment not found"}, status=404)
-
-            # 🔥 Update enrollment
-            enrollment.payment_status = "paid"
-            enrollment.razorpay_order_id = razorpay_order_id
-            enrollment.razorpay_payment_id = razorpay_payment_id
-            enrollment.save()
+            updated = 0
+            for e_id in ids_to_update:
+                try:
+                    enrollment = Enrollment.objects.get(id=e_id)
+                    # 🔥 Update enrollment
+                    enrollment.payment_status = "paid"
+                    enrollment.razorpay_order_id = razorpay_order_id
+                    enrollment.razorpay_payment_id = razorpay_payment_id
+                    enrollment.save()
+                    updated += 1
+                except Enrollment.DoesNotExist:
+                    continue
 
             return Response({
-                "message": "Payment verified & enrollment updated"
+                "message": f"Payment verified & {updated} enrollment(s) updated"
             })
 
         else:
@@ -427,4 +463,4 @@ class EnrollmentPaymentDetailView(APIView):
             
         payment.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-
+

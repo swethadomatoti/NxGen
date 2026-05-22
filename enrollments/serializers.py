@@ -38,10 +38,28 @@ class EnrollmentSerializer(serializers.ModelSerializer):
     # Or to fetch from related_name='payment_details' (which returns a queryset) we can use a SerializerMethodField
     payment_detail = serializers.SerializerMethodField()
 
+    # New field to show all courses the student is enrolled in
+    all_enrolled_courses = serializers.SerializerMethodField()
+
     class Meta:
         model = Enrollment
         fields = "__all__"
         read_only_fields = ["status", "is_active"]
+
+    def get_all_enrolled_courses(self, obj):
+        if obj.email:
+            enrollments = Enrollment.objects.filter(email=obj.email).select_related('course')
+            return [
+                {
+                    "enrollment_id": e.id,
+                    "course_id": e.course.id if e.course else None,
+                    "course_title": e.course.title if e.course else None,
+                    "status": e.status,
+                    "fee_status": getattr(e, 'fee_status', 'Pending'),
+                }
+                for e in enrollments
+            ]
+        return []
 
     def get_payment_detail(self, obj):
         payment = obj.payment_details.first()
