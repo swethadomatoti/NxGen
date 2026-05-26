@@ -1024,7 +1024,7 @@ class AssignmentStatusView(APIView):
                 ).first()
             else:
                 batch = None
-            batch_data = {"id": batch.id, "name": batch.name} if batch else None
+            batch_data = {"id": batch.id, "name": batch.name.name if getattr(batch, 'name', None) else f"Batch {batch.id}"} if batch else None
 
             if sub:
                 response_data.append({
@@ -1594,7 +1594,14 @@ class FileAccessView(APIView):
                         return Response({"error": f"Lesson with ID {obj_id} not found"}, status=404)
                 
             elif file_type == 'assignment':
-                obj = Assignment.objects.get(id=obj_id)
+                try:
+                    obj = Assignment.objects.get(id=obj_id)
+                except (Assignment.DoesNotExist, ValueError):
+                    # Frontend sometimes sends lesson_id as id when requesting assignment files
+                    obj = Assignment.objects.filter(lesson_id=obj_id).order_by('-created_at').first()
+                    if not obj:
+                        raise Assignment.DoesNotExist
+
                 permission = CanEditCourseContent()
                 if not permission.has_object_permission(request, self, obj) and request.user.role == 'student':
                     from enrollments.models import Enrollment

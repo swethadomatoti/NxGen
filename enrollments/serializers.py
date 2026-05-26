@@ -115,10 +115,26 @@ class StudentEnrolledCourseSerializer(serializers.ModelSerializer):
     progress = serializers.SerializerMethodField()
     completed_lessons = serializers.SerializerMethodField()
     total_lessons = serializers.SerializerMethodField()
+    payment_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = Enrollment
-        fields = ['id', 'course_id', 'course_title', 'instructor_name', 'progress', 'completed_lessons', 'total_lessons', 'status']
+        fields = ['id', 'course_id', 'course_title', 'instructor_name', 'progress', 'completed_lessons', 'total_lessons', 'status', 'fee_status', 'payment_detail']
+
+    def get_payment_detail(self, obj):
+        payment = obj.payment_details.first()
+        if payment:
+            return {
+                "fee_amount": float(payment.fee_amount),
+                "payment_paid": float(payment.payment_paid),
+                "remaining_balance": float(payment.remaining_balance)
+            }
+        else:
+            return {
+                "fee_amount": float(obj.course.price) if obj.course and hasattr(obj.course, 'price') else 0.0,
+                "payment_paid": 0.0,
+                "remaining_balance": float(obj.course.price) if obj.course and hasattr(obj.course, 'price') else 0.0
+            }
 
     def get_instructor_name(self, obj):
         instructor = obj.course.instructor_assigned_courses.first()

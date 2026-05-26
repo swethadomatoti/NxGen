@@ -23,6 +23,18 @@ class AssignmentSerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ('instructor', 'created_by', 'updated_by')
 
+    def to_representation(self, instance):
+        """Override to provide properly signed Cloudinary URLs for the file field."""
+        ret = super().to_representation(instance)
+        if instance.file:
+            try:
+                from .storage import get_signed_url
+                signed_url = get_signed_url(instance.file.name)
+                ret['file'] = signed_url if signed_url else ret['file']
+            except Exception:
+                pass
+        return ret
+
     def get_instructor_details(self, obj):
         if obj.instructor:
             return {
@@ -111,6 +123,18 @@ class LessonSerializer(serializers.ModelSerializer):
             data.pop('file', None)
             
         return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        """Override to provide properly signed Cloudinary URLs for the file field."""
+        ret = super().to_representation(instance)
+        if instance.file:
+            try:
+                from .storage import get_signed_url
+                signed_url = get_signed_url(instance.file.name)
+                ret['file'] = signed_url if signed_url else ret['file']
+            except Exception:
+                pass
+        return ret
 
     class Meta:
         model = Lesson

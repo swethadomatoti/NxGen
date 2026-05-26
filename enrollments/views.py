@@ -193,23 +193,56 @@ class CreateOrderView(APIView):
 
     def post(self, request):
         amount = request.data.get("amount")  # in rupees
+        enrollment_id = request.data.get("enrollment_id")
 
-        client = razorpay.Client(auth=(
-            settings.RAZORPAY_KEY_ID,
-            settings.RAZORPAY_KEY_SECRET
-        ))
+        if enrollment_id:
+            try:
+                enrollment = Enrollment.objects.get(id=enrollment_id)
+                if enrollment.status != 'approved':
+                    return Response(
+                        {"error": "Payment can only be initiated for approved enrollments."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                # If no amount is provided, default to the course price or remaining balance
+                if not amount:
+                    payment_detail = enrollment.payment_details.first()
+                    if payment_detail and payment_detail.remaining_balance > 0:
+                        amount = payment_detail.remaining_balance
+                    elif enrollment.course and enrollment.course.price:
+                        amount = enrollment.course.price
+            except Enrollment.DoesNotExist:
+                return Response({"error": "Enrollment not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        order = client.order.create({
-            "amount": int(amount) * 100,  # convert to paisa
-            "currency": "INR",
-            "payment_capture": 1
-        })
+        if not amount:
+            return Response({"error": "Amount is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({
-            "order_id": order["id"],
-            "amount": order["amount"],
-            "key": settings.RAZORPAY_KEY_ID
-        })
+        try:
+            client = razorpay.Client(auth=(
+                settings.RAZORPAY_KEY_ID,
+                settings.RAZORPAY_KEY_SECRET
+            ))
+
+            order = client.order.create({
+                "amount": int(float(amount) * 100),  # convert to paisa securely
+                "currency": "INR",
+                "payment_capture": 1
+            })
+
+            return Response({
+                "order_id": order["id"],
+                "amount": order["amount"],
+                "key": settings.RAZORPAY_KEY_ID
+            })
+        except razorpay.errors.BadRequestError as e:
+            return Response(
+                {"error": f"Razorpay Bad Request: {str(e)}", "details": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {"error": "Failed to create order", "details": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 
@@ -241,6 +274,14 @@ class VerifyPaymentView(APIView):
             if not ids_to_update:
                 return Response({"error": "No enrollment ID provided"}, status=400)
 
+            # 🔥 Fetch secure order details directly from Razorpay
+            try:
+                client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+                order_info = client.order.fetch(razorpay_order_id)
+                amount_paid = order_info.get("amount", 0) / 100.0  # convert paisa to rupees
+            except Exception:
+                amount_paid = data.get("amount") # fallback to frontend payload if fetch fails
+
             updated = 0
             for e_id in ids_to_update:
                 try:
@@ -250,6 +291,15 @@ class VerifyPaymentView(APIView):
                     enrollment.razorpay_order_id = razorpay_order_id
                     enrollment.razorpay_payment_id = razorpay_payment_id
                     enrollment.save()
+                    
+                    # 🔥 Update PaymentDetail
+                    payment_detail, _ = PaymentDetail.objects.get_or_create(enrollment=enrollment)
+                    if amount_paid:
+                        payment_detail.payment_paid = float(payment_detail.payment_paid) + float(amount_paid)
+                    else:
+                        payment_detail.payment_paid = float(payment_detail.fee_amount) if payment_detail.fee_amount else float(enrollment.course.price)
+                    payment_detail.save()
+                    
                     updated += 1
                 except Enrollment.DoesNotExist:
                     continue
