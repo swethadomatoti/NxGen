@@ -25,8 +25,9 @@ import razorpay
 
 from django.http import HttpResponse
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib import colors
+from reportlab.platypus import Table, TableStyle
 
 
 
@@ -533,6 +534,7 @@ class GenerateInvoiceView(APIView):
         
         # Determine format (json or pdf) - use 'export' as parameter to avoid DRF format conflicts
         output_format = request.query_params.get('export', 'json')
+        is_preview = request.query_params.get('preview', 'false').lower() == 'true'
         
         # Use enrollment creation date to ensure the invoice number and date stay the same on every download
         base_date = enrollment.created_at if enrollment.created_at else timezone.now()
@@ -544,91 +546,213 @@ class GenerateInvoiceView(APIView):
         amount_paid = payment.payment_paid if payment else 0
         balance_remaining = payment.remaining_balance if payment else (enrollment.course.price if enrollment.course else 0)
         
-        if output_format.lower() == 'pdf':
+        if output_format.lower() == 'pdf' or is_preview:
             # Generate PDF
             response = HttpResponse(content_type='application/pdf')
-            response['Content-Disposition'] = f'attachment; filename="Invoice_{invoice_number}.pdf"'
+            disposition = "inline" if is_preview else "attachment"
+            response['Content-Disposition'] = f'{disposition}; filename="Invoice_{invoice_number}.pdf"'
             
-            p = canvas.Canvas(response, pagesize=letter)
-            width, height = letter
+            p = canvas.Canvas(response, pagesize=A4)
+            width, height = A4
             
-            # Title
-            p.setFont("Helvetica-Bold", 24)
-            p.drawString(50, height - 50, "INVOICE")
+            # Colors
+            primary_color = colors.HexColor("#062854")  # Dark blue for NxGen
+            bg_color = colors.HexColor("#EAF1F8")       # Light blueish for total background
+            border_color = colors.HexColor("#E0E0E0")
             
-            # Company Details (Placeholder)
-            p.setFont("Helvetica", 10)
-            p.drawString(50, height - 70, "Your Company Name")
-            p.drawString(50, height - 85, "123 Business Road, City, Country")
+            # --- Header (Blue Box) ---
+            p.setFillColor(primary_color)
+            p.roundRect(20, height - 140, width - 40, 120, radius=8, fill=1, stroke=0)
             
-            # Invoice Info
-            p.setFont("Helvetica-Bold", 12)
-            p.drawString(350, height - 50, f"Invoice No: {invoice_number}")
-            p.setFont("Helvetica", 10)
-            p.drawString(350, height - 65, f"Date: {invoice_date}")
-            p.drawString(350, height - 80, f"Status: {enrollment.fee_status}")
+            # White Logo Box
+            p.setFillColor(colors.white)
+            p.roundRect(40, height - 110, 140, 60, radius=6, fill=1, stroke=0)
             
-            # Separator Line
-            p.setStrokeColor(colors.grey)
-            p.line(50, height - 100, width - 50, height - 100)
-            
-            # Student Details
-            p.setFont("Helvetica-Bold", 12)
-            p.drawString(50, height - 130, "Billed To:")
-            p.setFont("Helvetica", 10)
-            p.drawString(50, height - 145, f"Name: {enrollment.name}")
-            p.drawString(50, height - 160, f"Email: {enrollment.email}")
-            p.drawString(50, height - 175, f"Phone: {enrollment.phone}")
-            
-            # Course Details Section
-            y_position = height - 230
-            p.setFont("Helvetica-Bold", 12)
-            p.drawString(50, y_position, "Course Details")
-            p.line(50, y_position - 5, width - 50, y_position - 5)
-            
-            p.setFont("Helvetica", 10)
-            y_position -= 25
-            course_title = enrollment.course.title if enrollment.course else 'N/A'
-            p.drawString(50, y_position, f"Title: {course_title}")
-            y_position -= 15
-            p.drawString(50, y_position, f"Type: {getattr(enrollment, 'course_type', 'N/A')}")
-            y_position -= 15
-            p.drawString(50, y_position, f"Mode: {getattr(enrollment, 'preferred_mode', 'N/A')}")
-            
-            # Payment Details Section
-            y_position -= 40
-            p.setFont("Helvetica-Bold", 12)
-            p.drawString(50, y_position, "Payment Summary")
-            p.line(50, y_position - 5, width - 50, y_position - 5)
-            
-            p.setFont("Helvetica", 10)
-            y_position -= 25
-            p.drawString(50, y_position, "Total Course Fee:")
-            p.drawString(200, y_position, f"Rs. {total_fee}")
-            
-            y_position -= 15
-            p.drawString(50, y_position, "Amount Paid:")
-            p.drawString(200, y_position, f"Rs. {amount_paid}")
-            
-            y_position -= 20
+            # NxGen Logo Text inside white box
+            p.setFillColor(primary_color)
+            p.setFont("Helvetica-Bold", 26)
+            p.drawString(50, height - 75, "NxGen")
             p.setFont("Helvetica-Bold", 10)
-            p.drawString(50, y_position, "Balance Remaining:")
-            p.drawString(200, y_position, f"Rs. {balance_remaining}")
+            p.drawString(50, height - 90, "TECH ACADEMY")
             
-            # Transaction Info
-            y_position -= 40
+            # Address Text in Blue Box
+            p.setFillColor(colors.white)
             p.setFont("Helvetica", 9)
-            p.drawString(50, y_position, "Transaction Info:")
-            if enrollment.razorpay_payment_id:
-                y_position -= 12
-                p.drawString(50, y_position, f"Payment ID: {enrollment.razorpay_payment_id}")
-            if enrollment.razorpay_order_id:
-                y_position -= 12
-                p.drawString(50, y_position, f"Order ID: {enrollment.razorpay_order_id}")
+            p.drawString(200, height - 70, "First Floor, 1-121/63 Survey No. 63")
+            p.drawString(200, height - 85, "Part Hotel Sitara Grand Backside,")
+            p.drawString(200, height - 100, "Miyapur, Telangana 500049")
             
-            # Footer
-            p.setFont("Helvetica-Oblique", 8)
-            p.drawString(50, 50, "Thank you for joining our course!")
+            # Right side Invoice Info
+            p.setFont("Helvetica-Bold", 32)
+            p.drawRightString(width - 40, height - 65, "INVOICE")
+            
+            p.setFont("Helvetica", 10)
+            p.drawRightString(width - 40, height - 90, f"No:   {invoice_number}")
+            p.drawRightString(width - 40, height - 105, f"Date:   {getattr(base_date, 'strftime', lambda x: invoice_date)('%Y-%m-%d %H:%M:%S')}")
+            
+            # --- Bill To & Details ---
+            # Left side: BILL TO
+            y_start = height - 160
+            p.setFont("Helvetica-Bold", 10)
+            p.setFillColor(primary_color)
+            p.drawString(40, y_start, "BILL TO")
+            
+            p.setFillColor(colors.black)
+            
+            # Details function
+            def draw_kv(x, y, k, v):
+                p.setFont("Helvetica-Bold", 9)
+                p.drawString(x, y, k)
+                p.setFont("Helvetica", 9)
+                p.drawString(x + 80, y, ":  " + str(v))
+                
+            draw_kv(40, y_start - 20, "Student Name", enrollment.name)
+            draw_kv(40, y_start - 35, "Phone", enrollment.phone)
+            draw_kv(40, y_start - 50, "Email", enrollment.email)
+            draw_kv(40, y_start - 65, "Enroll Date", getattr(enrollment.created_at, 'strftime', lambda x: "")("%d %b %Y") if enrollment.created_at else "N/A")
+            
+            # Right side: Student/Course Data (inside a rounded rect)
+            rx = width / 2 + 20
+            ry = y_start - 75
+            rw = width / 2 - 60
+            rh = 85
+            
+            p.setStrokeColor(border_color)
+            p.setFillColor(colors.white)
+            p.roundRect(rx, ry, rw, rh, 5, fill=1)
+            
+            p.setFillColor(colors.black)
+            draw_kv(rx + 10, ry + 65, "Course", enrollment.course.title if enrollment.course else 'N/A')
+            draw_kv(rx + 10, ry + 50, "Type", getattr(enrollment, 'course_type', 'N/A'))
+            draw_kv(rx + 10, ry + 35, "Mode", getattr(enrollment, 'preferred_mode', 'N/A'))
+            
+            if enrollment.razorpay_payment_id:
+                draw_kv(rx + 10, ry + 20, "Payment ID", enrollment.razorpay_payment_id)
+            elif enrollment.razorpay_order_id:
+                draw_kv(rx + 10, ry + 20, "Order ID", enrollment.razorpay_order_id[:15] + "..")
+            else:
+                 draw_kv(rx + 10, ry + 20, "Payment Mode", "Online")
+            
+            # --- Items Table ---
+            y_curr = ry - 30
+            
+            table_data = [
+                ["#", "DESCRIPTION", "", "AMOUNT (INR)"]
+            ]
+            
+            # Main item
+            course_title = enrollment.course.title if enrollment.course else 'Course Fee'
+            table_data.append(["1", course_title, "", f"Rs. {float(total_fee):,.2f}"])
+            
+            # Blank rows to fill space
+            table_data.append(["", "", "", ""])
+            
+            # Totals
+            table_data.append(["", "", "Subtotal", f"Rs. {float(total_fee):,.2f}"])
+            table_data.append(["", "", "Amount Paid", f"Rs. {float(amount_paid):,.2f}"])
+            
+            table = Table(table_data, colWidths=[30, 250, 100, 135])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                ('ALIGN', (-1, 0), (-1, -1), 'RIGHT'),
+                ('ALIGN', (-2, 0), (-2, -1), 'RIGHT'),
+                
+                # Rows style
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                
+                # Border
+                ('GRID', (0, 0), (-1, -1), 0.5, border_color),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                
+                # Bottom Row (Totals padding)
+                ('SPAN', (0, -1), (1, -1)),
+                ('SPAN', (0, -2), (1, -2)),
+                ('ALIGN', (-2, -1), (-2, -1), 'RIGHT'),
+                ('ALIGN', (-2, -2), (-2, -2), 'RIGHT'),
+            ]))
+            
+            tw, th = table.wrap(width - 80, height)
+            table.drawOn(p, 40, y_curr - th)
+            
+            # Balance row below table
+            y_curr = y_curr - th
+            
+            table_bal = Table([
+                ["", "", "Balance Remaining", f"Rs. {float(balance_remaining):,.2f}"]
+            ], colWidths=[30, 250, 100, 135])
+            
+            table_bal.setStyle(TableStyle([
+                ('BACKGROUND', (-2, 0), (-1, 0), bg_color),
+                ('TEXTCOLOR', (-2, 0), (-1, 0), colors.black),
+                ('FONTNAME', (-2, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('ALIGN', (-1, 0), (-1, 0), 'RIGHT'),
+                ('ALIGN', (-2, 0), (-2, 0), 'RIGHT'),
+                ('GRID', (-2, 0), (-1, 0), 0.5, border_color),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+            ]))
+            
+            bw, bh = table_bal.wrap(width - 80, height)
+            table_bal.drawOn(p, 40, y_curr - bh)
+            y_curr -= bh
+            
+            # --- Payment Info & Signatory ---
+            y_curr -= 50
+            p.setFont("Helvetica-Bold", 10)
+            p.setFillColor(primary_color)
+            p.drawString(40, y_curr, "PAYMENT INFORMATION")
+            
+            p.setFont("Helvetica", 10)
+            p.setFillColor(colors.black)
+            p.drawString(40, y_curr - 17, "Thank you for your payment. Your fee has been recorded.")
+            draw_kv(40, y_curr - 37, "Payment Status", enrollment.fee_status)
+            draw_kv(40, y_curr - 52, "Paid Amount", f"Rs. {float(amount_paid):,.2f}")
+            
+            # Terms
+            y_curr -= 85
+            p.setFont("Helvetica-Bold", 11)
+            p.setFillColor(primary_color)
+            p.drawString(40, y_curr, "TERMS & CONDITIONS")
+            p.setFont("Helvetica", 10)
+            p.setFillColor(colors.black)
+            p.drawString(40, y_curr - 18, "• This invoice is computer generated and does not require a signature.")
+            p.drawString(40, y_curr - 32, "• Fees once paid are non-refundable & non-transferable.")
+            p.drawString(40, y_curr - 46, f"• Please quote your Invoice No. ({invoice_number}) for any future correspondence.")
+            
+            # --- Footer (Blue bar at bottom) ---
+            p.setFillColor(primary_color)
+            p.roundRect(20, 20, width - 40, 50, radius=8, fill=1, stroke=0)
+            
+            p.setFillColor(colors.white)
+            
+            # Phone Section
+            px = width / 2 - 170
+            py = 45
+            p.setStrokeColor(colors.white)
+            p.setLineWidth(1.5)
+            # Draw a tiny phone outline
+            p.roundRect(px-7, py-8, 12, 18, radius=2, stroke=1, fill=0)
+            p.circle(px-1, py-5, 1, stroke=1, fill=1)
+            
+            p.setFont("Helvetica-Bold", 11)
+            p.drawString(px + 15, py - 3, "9701314138")
+            
+            # Web Section
+            wx = width / 2 + 10
+            # Draw a tiny globe outline
+            p.circle(wx, py+1, 9, stroke=1, fill=0)
+            p.line(wx-9, py+1, wx+9, py+1)
+            p.line(wx, py-8, wx, py+10)
+            p.ellipse(wx-4, py-8, wx+4, py+10, stroke=1, fill=0)
+            
+            p.drawString(wx + 15, py - 3, "https://nxgentechacademy.com/")
             
             p.showPage()
             p.save()
@@ -691,6 +815,7 @@ class PaidInvoicesListView(APIView):
                 "balance_remaining": payment.remaining_balance if payment else (enrollment.course.price if enrollment.course else 0),
                 "fee_status": enrollment.fee_status,
                 "download_pdf_url": f"/api/enrollments/{enrollment.id}/invoice/?export=pdf",
+                "preview_pdf_url": f"/api/enrollments/{enrollment.id}/invoice/?preview=true",
                 "json_details_url": f"/api/enrollments/{enrollment.id}/invoice/"
             })
         
