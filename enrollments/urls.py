@@ -16,7 +16,9 @@ from .views import (
     TimingChoicesView,
     ExperienceChoicesView,
     CurrentStatusChoicesView,
-    EnrollmentPaymentDetailView
+    EnrollmentPaymentDetailView,
+    GenerateInvoiceView,
+    PaidInvoicesListView,
 )
 
 urlpatterns = [
@@ -41,4 +43,9 @@ urlpatterns = [
     
     # Payment Details URLs
     path('<int:enrollment_id>/payment-details/', EnrollmentPaymentDetailView.as_view()),
+    
+    # Invoice URLs
+    path('invoices/paid/', PaidInvoicesListView.as_view()),
+    path('<int:enrollment_id>/invoice/', GenerateInvoiceView.as_view()),
 ]
+    

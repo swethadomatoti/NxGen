@@ -21,8 +21,13 @@ from .models import Enrollment, PaymentDetail
 from .serializers import EnrollmentSerializer, PaymentDetailSerializer
 from accounts.models import StudentProfile
 
-
 import razorpay
+
+from django.http import HttpResponse
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+
 
 
 
@@ -513,4 +518,181 @@ class EnrollmentPaymentDetailView(APIView):
             
         payment.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------- INVOICE ---------------- #
+
+class GenerateInvoiceView(APIView):
+    def get(self, request, enrollment_id):
+        try:
+            enrollment = Enrollment.objects.get(id=enrollment_id)
+        except Enrollment.DoesNotExist:
+            return Response({"error": "Enrollment not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        payment = PaymentDetail.objects.filter(enrollment=enrollment).first()
+        
+        # Determine format (json or pdf) - use 'export' as parameter to avoid DRF format conflicts
+        output_format = request.query_params.get('export', 'json')
+        
+        # Use enrollment creation date to ensure the invoice number and date stay the same on every download
+        base_date = enrollment.created_at if enrollment.created_at else timezone.now()
+        
+        invoice_number = f"INV-{enrollment.id}-{base_date.strftime('%Y%m%d%H%M%S')}"
+        invoice_date = base_date.strftime("%Y-%m-%d %H:%M:%S")
+        
+        total_fee = payment.fee_amount if payment else (enrollment.course.price if enrollment.course else 0)
+        amount_paid = payment.payment_paid if payment else 0
+        balance_remaining = payment.remaining_balance if payment else (enrollment.course.price if enrollment.course else 0)
+        
+        if output_format.lower() == 'pdf':
+            # Generate PDF
+            response = HttpResponse(content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="Invoice_{invoice_number}.pdf"'
+            
+            p = canvas.Canvas(response, pagesize=letter)
+            width, height = letter
+            
+            # Title
+            p.setFont("Helvetica-Bold", 24)
+            p.drawString(50, height - 50, "INVOICE")
+            
+            # Company Details (Placeholder)
+            p.setFont("Helvetica", 10)
+            p.drawString(50, height - 70, "Your Company Name")
+            p.drawString(50, height - 85, "123 Business Road, City, Country")
+            
+            # Invoice Info
+            p.setFont("Helvetica-Bold", 12)
+            p.drawString(350, height - 50, f"Invoice No: {invoice_number}")
+            p.setFont("Helvetica", 10)
+            p.drawString(350, height - 65, f"Date: {invoice_date}")
+            p.drawString(350, height - 80, f"Status: {enrollment.fee_status}")
+            
+            # Separator Line
+            p.setStrokeColor(colors.grey)
+            p.line(50, height - 100, width - 50, height - 100)
+            
+            # Student Details
+            p.setFont("Helvetica-Bold", 12)
+            p.drawString(50, height - 130, "Billed To:")
+            p.setFont("Helvetica", 10)
+            p.drawString(50, height - 145, f"Name: {enrollment.name}")
+            p.drawString(50, height - 160, f"Email: {enrollment.email}")
+            p.drawString(50, height - 175, f"Phone: {enrollment.phone}")
+            
+            # Course Details Section
+            y_position = height - 230
+            p.setFont("Helvetica-Bold", 12)
+            p.drawString(50, y_position, "Course Details")
+            p.line(50, y_position - 5, width - 50, y_position - 5)
+            
+            p.setFont("Helvetica", 10)
+            y_position -= 25
+            course_title = enrollment.course.title if enrollment.course else 'N/A'
+            p.drawString(50, y_position, f"Title: {course_title}")
+            y_position -= 15
+            p.drawString(50, y_position, f"Type: {getattr(enrollment, 'course_type', 'N/A')}")
+            y_position -= 15
+            p.drawString(50, y_position, f"Mode: {getattr(enrollment, 'preferred_mode', 'N/A')}")
+            
+            # Payment Details Section
+            y_position -= 40
+            p.setFont("Helvetica-Bold", 12)
+            p.drawString(50, y_position, "Payment Summary")
+            p.line(50, y_position - 5, width - 50, y_position - 5)
+            
+            p.setFont("Helvetica", 10)
+            y_position -= 25
+            p.drawString(50, y_position, "Total Course Fee:")
+            p.drawString(200, y_position, f"Rs. {total_fee}")
+            
+            y_position -= 15
+            p.drawString(50, y_position, "Amount Paid:")
+            p.drawString(200, y_position, f"Rs. {amount_paid}")
+            
+            y_position -= 20
+            p.setFont("Helvetica-Bold", 10)
+            p.drawString(50, y_position, "Balance Remaining:")
+            p.drawString(200, y_position, f"Rs. {balance_remaining}")
+            
+            # Transaction Info
+            y_position -= 40
+            p.setFont("Helvetica", 9)
+            p.drawString(50, y_position, "Transaction Info:")
+            if enrollment.razorpay_payment_id:
+                y_position -= 12
+                p.drawString(50, y_position, f"Payment ID: {enrollment.razorpay_payment_id}")
+            if enrollment.razorpay_order_id:
+                y_position -= 12
+                p.drawString(50, y_position, f"Order ID: {enrollment.razorpay_order_id}")
+            
+            # Footer
+            p.setFont("Helvetica-Oblique", 8)
+            p.drawString(50, 50, "Thank you for joining our course!")
+            
+            p.showPage()
+            p.save()
+            return response
+            
+        else:
+            # Generate JSON Output
+            invoice_data = {
+                "invoice_number": invoice_number,
+                "date": invoice_date,
+                "student_details": {
+                    "name": enrollment.name,
+                    "email": enrollment.email,
+                    "phone": enrollment.phone
+                },
+                "course_details": {
+                    "title": enrollment.course.title if enrollment.course else None,
+                    "type": getattr(enrollment, 'course_type', None),
+                    "mode": getattr(enrollment, 'preferred_mode', None)
+                },
+                "payment_details": {
+                    "total_fee": total_fee,
+                    "amount_paid": amount_paid,
+                    "balance_remaining": balance_remaining,
+                    "payment_status": enrollment.payment_status,
+                    "fee_status": enrollment.fee_status,
+                },
+                "transaction_details": {
+                    "razorpay_order_id": enrollment.razorpay_order_id,
+                    "razorpay_payment_id": enrollment.razorpay_payment_id,
+                }
+            }
+            
+            return Response(invoice_data, status=status.HTTP_200_OK)
+
+
+from django.db.models import Q
+
+class PaidInvoicesListView(APIView):
+    def get(self, request):
+        # Fetch enrollments where a payment has been made
+        enrollments = Enrollment.objects.filter(
+            Q(fee_status__in=['Paid', 'Partially Paid']) | 
+            Q(payment_status__iexact='paid') | 
+            Q(payment_details__payment_paid__gt=0)
+        ).distinct().order_by('-created_at')
+
+        data = []
+        for enrollment in enrollments:
+            payment = enrollment.payment_details.first()
+            base_date = enrollment.created_at if enrollment.created_at else timezone.now()
+            
+            data.append({
+                "enrollment_id": enrollment.id,
+                "invoice_number": f"INV-{enrollment.id}-{base_date.strftime('%Y%m%d%H%M%S')}",
+                "student_name": enrollment.name,
+                "student_email": enrollment.email,
+                "course_title": enrollment.course.title if enrollment.course else "N/A",
+                "amount_paid": payment.payment_paid if payment else 0,
+                "balance_remaining": payment.remaining_balance if payment else (enrollment.course.price if enrollment.course else 0),
+                "fee_status": enrollment.fee_status,
+                "download_pdf_url": f"/api/enrollments/{enrollment.id}/invoice/?export=pdf",
+                "json_details_url": f"/api/enrollments/{enrollment.id}/invoice/"
+            })
+        
+        return Response(data, status=status.HTTP_200_OK)
 
